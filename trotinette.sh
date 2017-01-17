@@ -204,14 +204,15 @@ function pi_install_yunohost()
     # Dirty hack to work around lack of ipv6 for nginx
 
     apt-get install -y nginx nginx-extras
+    echo -e "\n Applying dirty workaround hack on nginx to disable ipv6 ... \n"
     sed -i 's/listen \[/#listen \[/g' /etc/nginx/sites-available/default
     service nginx start
     apt-get install -y nginx nginx-extras
 
     # Dirty hack to work around lack of ipv6 for dovecot
 
-    apt-get install -y dovecot-core dovecot-ldap dovecot-lmtpd
-    dovecot-managesieved dovecot-antispam
+    apt-get install -y dovecot-core dovecot-ldap dovecot-lmtpd dovecot-managesieved dovecot-antispam
+    echo -e "\n Applying dirty workaround hack on dovecot to disable ipv6 ... \n"
     sed -i 's/::$/::\nlisten = */g' /etc/dovecot/dovecot.conf
     service dovecot start
     apt-get install -y dovecot-core dovecot-ldap dovecot-lmtpd
@@ -229,8 +230,8 @@ function pi_install_yunohost()
     ./install_yunohost -a -d testing
 
     # Dirty hack again to work around lack of ipv6 for nginx - in yunohost's templates
-    sed -i 's/listen \[/#listen \[/g'
-    /usr/share/yunohost/templates/nginx/plain/yunohost_admin.conf
+    echo -e "\n Applying dirty workaround hack on yunohost/nginx to disable ipv6 ... \n"
+    sed -i 's/listen \[/#listen \[/g' /usr/share/yunohost/templates/nginx/plain/yunohost_admin.conf
 
     # Relaunch configuration ?
     ./install_yunohost -a -d testing
