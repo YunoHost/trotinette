@@ -249,11 +249,11 @@ function main()
 
     launch_virtual_pi
 
-    #pi_resize_rootfs
+    pi_resize_rootfs
     
-    #run_on_virtual_pi pi_upgrade
-    #poweroff_virtual_pi
-    #launch_virtual_pi
+    run_on_virtual_pi pi_upgrade
+    poweroff_virtual_pi
+    launch_virtual_pi
 
     run_on_virtual_pi pi_install_yunohost
     
