@@ -22,3 +22,4 @@ Launching this script will :
     - Undo the dirty hack (except to have ipv6 in real life)
     - Undo the tweak of ld.so.preload and /etc/fstab
     - Clear logs and ssh keys
+    - rpi-update might not be needed after all (it's only for bleeding-edge firmware, apt-get upgrade also upgrades it though less recent). That would simplify the procedure to have one reboot less.
