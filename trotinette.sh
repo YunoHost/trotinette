@@ -25,7 +25,7 @@ function fetch_kernels()
 {
 
     # Clone repo if it's not already there
-    if [ ! -d "$KERNEL_REPO_NAME" ]; 
+    if [ ! -d "$KERNEL_REPO_NAME" ];
     then
         echo -e "\n Fetching kernels ...\n"
         git clone $KERNEL_REPO
@@ -78,12 +78,54 @@ function tweak_image()
     cat .ssh/trotinette.pub >> /mnt/loop0p2/root/.ssh/authorized_keys
 
     # Umount image
-    umount /mnt/loop0p2 
+    umount /mnt/loop0p2
     kpartx -d $IMAGE.img
 
     # Exand image size
-    qemu-img resize $IMAGE.img +2G
+    qemu-img resize $IMAGE.img +1G
 }
+
+function untweak_image()
+{
+    # Start by mounting the image..
+    kpartx -av ${IMAGE}.img
+    sleep 1
+    mkdir -p /mnt/loop0p2
+    mount /dev/mapper/loop0p2 /mnt/loop0p2
+
+
+    # Revert the dirty ipv6 hack
+    sed -i 's/#listen \[/listen \[/g' /mnt/loop0p2/etc/nginx/sites-available/default
+    sed -i 's/::\nlisten = */::/g'    /mnt/loop0p2/etc/dovecot/dovecot.conf
+    sed -i 's/#listen \[/listen \[/g' /mnt/loop0p2/usr/share/yunohost/templates/nginx/plain/yunohost_admin.conf
+
+    # Re-enable stuff in ld.so.preload...
+    sed -i 's@#@ @g' /mnt/loop0p2/etc/ld.so.preloa
+    # Re-enable mounting of /dev/mm0blockthing
+    sed -i 's@#/dev@/dev@g' /mnt/loop0p2/etc/fstab
+    # Allow root login on ssh with password
+    sed -i '0,/without-password/s/without-password/yes/g' /mnt/loop0p2/etc/ssh/sshd_config
+    # Define root password as 'yunohost'
+    sed -i '1d' /mnt/loop0p2/etc/shadow
+    echo "root:$(echo "yunohost" | mkpasswd -m sha-512 -s):17130:0:99999:7:::" >> /mnt/loop0p2/etc/shadow
+
+    # TODO : shrink back rootfs ?
+
+    # Remove ssh key
+    rm /mnt/loop0p2/root/.ssh/authorized_keys
+
+	# Delete SSH keys
+	rm -f /mnt/loop0p2/etc/ssh/ssh_host_*
+
+    # Remove logs
+	find /mnt/loop0p2/var/log -type f -exec rm {} \;
+
+    # Umount image
+    umount /mnt/loop0p2
+    kpartx -d $IMAGE.img
+}
+
+
 
 ###############################################################################
 
@@ -102,7 +144,7 @@ function poweroff_virtual_pi()
     if [ `ps -ef | grep qemu | wc -l` -ge "2" ];
     then
         echo -e "\n Powering off currently running virtual pi. \n"
-        ssh -p 2200 -i ./.ssh/trotinette root@localhost "poweroff"
+        ssh -p 2200 -i ./.ssh/trotinette root@127.0.0.1 "poweroff"
         sleep 30
     fi
 }
@@ -135,7 +177,7 @@ function launch_virtual_pi()
             -net nic -net user,hostfwd=tcp::2200-:22
 
         # Make sure to not have a conflicting old ECDSA host key
-        ssh-keygen -f "/root/.ssh/known_hosts" -R [localhost]:2200
+        ssh-keygen -f "/root/.ssh/known_hosts" -R [127.0.0.1]:2200
 
         # Wait to be sure pi is fully up
         echo -e "\n Waiting for virtual pi to be fully up ... \n"
@@ -147,11 +189,16 @@ function launch_virtual_pi()
             echo -e "\n qemu crashed ? Aborting ! \n"
             exit 1
         fi
-        
-        sleep 50
-        
+
+        sleep 30
+
         # Add the new ECDSA host key
-        ssh-keyscan -H -p 2200 localhost >> ~/.ssh/known_hosts
+        ssh-keyscan -H -p 2200 127.0.0.1 >> ~/.ssh/known_hosts
+
+        sleep 20
+
+        # Add the new ECDSA host key
+        ssh-keyscan -H -p 2200 127.0.0.1 >> ~/.ssh/known_hosts
     fi
 }
 
@@ -161,17 +208,11 @@ function run_on_virtual_pi()
 {
     local function_to_run=$1
     local command_="$(typeset -f $function_to_run); $function_to_run;"
- 
+
     echo -e "\n Running function $function_to_run on virtual pi ... \n"
     echo -e "\n Command : \n $command_ \n"
 
-    ssh -p 2200 -i ./.ssh/trotinette root@localhost "$command_"
-}
-
-function dummy()
-{
-    lsb_release -a
-    poweroff
+    ssh -p 2200 -i ./.ssh/trotinette root@127.0.0.1 "$command_"
 }
 
 function pi_resize_sda_step1()
@@ -185,17 +226,12 @@ function pi_resize_sda_step2()
     fdisk -l | grep sda
 }
 
-function pi_resize_rootfs()
-{
-    run_on_virtual_pi pi_resize_sda_step1
-    poweroff_virtual_pi
-    launch_virtual_pi
-    run_on_virtual_pi pi_resize_sda_step2
-}
-
 function pi_upgrade()
 {
-    apt-get update && apt-get upgrade -y && apt-get install rpi-update && rpi-update
+    apt-get update && apt-get upgrade -y && apt-get install rpi-update
+    # We don't do the rpi-update because it's only to have bleeding-edge stuff
+    # The dist-upgrade already update the firmware (though it's not the most up
+    # to date, but it's good enough)
 }
 
 function pi_install_yunohost()
@@ -237,26 +273,30 @@ function pi_install_yunohost()
     ./install_yunohost -a -d testing
 
 }
+
 ###############################################################################
 
 function main()
 {
     poweroff_virtual_pi
-    
+
     install_dependencies
     fetch_kernels
     fetch_image
 
     launch_virtual_pi
 
-    pi_resize_rootfs
-    
-    run_on_virtual_pi pi_upgrade
+    run_on_virtual_pi pi_resize_sda_step1
     poweroff_virtual_pi
     launch_virtual_pi
+    run_on_virtual_pi pi_resize_sda_step2
 
+    run_on_virtual_pi pi_upgrade
     run_on_virtual_pi pi_install_yunohost
-    
+
+    poweroff_virtual_pi
+
+    untweak_image
 }
 
 main
