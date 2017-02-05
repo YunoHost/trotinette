@@ -82,11 +82,14 @@ function tweak_image()
     kpartx -d $IMAGE.img
 
     # Exand image size
-    qemu-img resize $IMAGE.img +1G
+    qemu-img resize $IMAGE.img +600M
 }
 
 function untweak_image()
 {
+
+    echo -e "\n Untweaking / cleaning image to be ready for prod \n"
+
     # Start by mounting the image..
     kpartx -av ${IMAGE}.img
     sleep 1
@@ -100,7 +103,7 @@ function untweak_image()
     sed -i 's/#listen \[/listen \[/g' /mnt/loop0p2/usr/share/yunohost/templates/nginx/plain/yunohost_admin.conf
 
     # Re-enable stuff in ld.so.preload...
-    sed -i 's@#@ @g' /mnt/loop0p2/etc/ld.so.preloa
+    sed -i 's@#@ @g' /mnt/loop0p2/etc/ld.so.preload
     # Re-enable mounting of /dev/mm0blockthing
     sed -i 's@#/dev@/dev@g' /mnt/loop0p2/etc/fstab
     # Allow root login on ssh with password
@@ -109,16 +112,11 @@ function untweak_image()
     sed -i '1d' /mnt/loop0p2/etc/shadow
     echo "root:$(echo "yunohost" | mkpasswd -m sha-512 -s):17130:0:99999:7:::" >> /mnt/loop0p2/etc/shadow
 
-    # TODO : shrink back rootfs ?
-
     # Remove ssh key
     rm /mnt/loop0p2/root/.ssh/authorized_keys
 
-	# Delete SSH keys
-	rm -f /mnt/loop0p2/etc/ssh/ssh_host_*
-
     # Remove logs
-	find /mnt/loop0p2/var/log -type f -exec rm {} \;
+    find /mnt/loop0p2/var/log -type f -exec rm {} \;
 
     # Umount image
     umount /mnt/loop0p2
@@ -177,28 +175,25 @@ function launch_virtual_pi()
             -net nic -net user,hostfwd=tcp::2200-:22
 
         # Make sure to not have a conflicting old ECDSA host key
-        ssh-keygen -f "/root/.ssh/known_hosts" -R [127.0.0.1]:2200
+        ssh-keygen -f "/root/.ssh/known_hosts" -R [127.0.0.1]:2200 2>/dev/null
 
         # Wait to be sure pi is fully up
         echo -e "\n Waiting for virtual pi to be fully up ... \n"
 
         sleep 5
 
-        if [ `ps -ef | grep qemu | wc -l` -le "1" ];
+        if [ "$(pgrep qemu-system-arm)" == "" ];
         then
+            pgrep qemu-system-arm
             echo -e "\n qemu crashed ? Aborting ! \n"
             exit 1
         fi
 
-        sleep 30
+        sleep 60
 
         # Add the new ECDSA host key
         ssh-keyscan -H -p 2200 127.0.0.1 >> ~/.ssh/known_hosts
 
-        sleep 20
-
-        # Add the new ECDSA host key
-        ssh-keyscan -H -p 2200 127.0.0.1 >> ~/.ssh/known_hosts
     fi
 }
 
@@ -213,6 +208,12 @@ function run_on_virtual_pi()
     echo -e "\n Command : \n $command_ \n"
 
     ssh -p 2200 -i ./.ssh/trotinette root@127.0.0.1 "$command_"
+
+    if [ "$?" -eq "255" ]
+    then
+        echo -e "\n Command execution failed ? Aborting ! \n"
+        exit 1
+    fi
 }
 
 function pi_resize_sda_step1()
@@ -223,7 +224,7 @@ function pi_resize_sda_step1()
 function pi_resize_sda_step2()
 {
     resize2fs /dev/sda2
-    fdisk -l | grep sda
+    df -h | grep /dev/root
 }
 
 function pi_upgrade()
@@ -251,15 +252,14 @@ function pi_install_yunohost()
     echo -e "\n Applying dirty workaround hack on dovecot to disable ipv6 ... \n"
     sed -i 's/::$/::\nlisten = */g' /etc/dovecot/dovecot.conf
     service dovecot start
-    apt-get install -y dovecot-core dovecot-ldap dovecot-lmtpd
-    dovecot-managesieved dovecot-antispam
+    apt-get install -y dovecot-core dovecot-ldap dovecot-lmtpd dovecot-managesieved dovecot-antispam
 
     # FIXME : add conf variable for install script source and branch to use
 
     # Launch actual yunohost install
     mkdir /tmp/install_script
     cd /tmp/install_script
-    wget https://raw.githubusercontent.com/YunoHost/install_script/4b16d1d12b435fd1b43cbd2302ea85850a22d65b/install_yunohost
+    wget https://raw.githubusercontent.com/YunoHost/install_script/master/install_yunohost
     chmod +x install_yunohost
     touch /var/log/yunohost-installation.log
     tail -f /var/log/yunohost-installation.log &
@@ -274,6 +274,16 @@ function pi_install_yunohost()
 
 }
 
+function pi_setup_firstboot()
+{
+    wget https://raw.githubusercontent.com/likeitneverwentaway/rpi_buildbot/master/yunohost-firstboot
+
+    chmod a+x yunohost-firstboot
+    cp yunohost-firstboot /etc/init.d/
+    insserv /etc/init.d/yunohost-firstboot
+    touch /etc/yunohost/firstboot
+}
+
 ###############################################################################
 
 function main()
@@ -286,13 +296,23 @@ function main()
 
     launch_virtual_pi
 
-    run_on_virtual_pi pi_resize_sda_step1
-    poweroff_virtual_pi
-    launch_virtual_pi
-    run_on_virtual_pi pi_resize_sda_step2
+    #run_on_virtual_pi pi_resize_sda_step1
+    #sleep 1
+    #poweroff_virtual_pi
+    #sleep 1
+    #launch_virtual_pi
+    #sleep 1
+    #run_on_virtual_pi pi_resize_sda_step2
 
-    run_on_virtual_pi pi_upgrade
-    run_on_virtual_pi pi_install_yunohost
+    cp ${IMAGE}.img ${IMAGE}-bkpafterresize.img
+
+    #run_on_virtual_pi pi_upgrade
+    #run_on_virtual_pi pi_install_yunohost
+    # FIXME : script fails here because of return value at the end of install o.O
+
+    run_on_virtual_pi pi_setup_firstboot
+
+    cp ${IMAGE}.img ${IMAGE}-bkpafterinstall.img
 
     poweroff_virtual_pi
 
