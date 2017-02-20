@@ -66,11 +66,6 @@ function tweak_image()
     sed -i 's@/dev@#/dev@g' /mnt/loop0p2/etc/fstab
     # Start ssh at boot
     touch /mnt/loop0p2/boot/ssh
-    # Allow root login on ssh with password
-    #sed -i '0,/without-password/s/without-password/yes/g' /mnt/loop0p2/etc/ssh/sshd_config
-    # Define root password (will be prompted during the script)
-    #sed -i '1d' /mnt/loop0p2/etc/shadow
-    #echo "root:$(mkpasswd -m sha-512 -S $(< /dev/urandom tr -dc A-Za-z0-9 | head -c15)):17130:0:99999:7:::" >> /mnt/loop0p2/etc/shadow
 
     # Generate a ssh key to be used by this script to easily access machine
     mkdir -p /mnt/loop0p2/root/.ssh
@@ -79,10 +74,10 @@ function tweak_image()
 
     # Umount image
     umount /mnt/loop0p2
-    kpartx -d $IMAGE.img
+    kpartx -d ${IMAGE}.img
 
     # Exand image size
-    qemu-img resize $IMAGE.img +600M
+    qemu-img resize ${IMAGE}.img +600M
 }
 
 function untweak_image()
@@ -107,10 +102,15 @@ function untweak_image()
     # Re-enable mounting of /dev/mm0blockthing
     sed -i 's@#/dev@/dev@g' /mnt/loop0p2/etc/fstab
     # Allow root login on ssh with password
+    cat  /mnt/loop0p2/etc/ssh/sshd_config | grep "PermitRootLogin"
     sed -i '0,/without-password/s/without-password/yes/g' /mnt/loop0p2/etc/ssh/sshd_config
+    cat  /mnt/loop0p2/etc/ssh/sshd_config | grep "PermitRootLogin"
     # Define root password as 'yunohost'
+    echo "Define root password as 'yunohost'"
+    cat /mnt/loop0p2/etc/shadow | grep "root"
     sed -i '1d' /mnt/loop0p2/etc/shadow
     echo "root:$(echo "yunohost" | mkpasswd -m sha-512 -s):17130:0:99999:7:::" >> /mnt/loop0p2/etc/shadow
+    cat /mnt/loop0p2/etc/shadow | grep "root"
 
     # Remove ssh key
     rm /mnt/loop0p2/root/.ssh/authorized_keys
@@ -120,7 +120,7 @@ function untweak_image()
 
     # Umount image
     umount /mnt/loop0p2
-    kpartx -d $IMAGE.img
+    kpartx -d ${IMAGE}.img
 }
 
 
@@ -135,6 +135,67 @@ function generate_ssh_key()
     ssh-keygen -t rsa -b 4096 -C "trotinette@yunohost.org" -N "" -f ./.ssh/trotinette
 }
 
+function wait_until_ssh_available()
+{
+    echo -e "\n Waiting until SSH to virtual pi is available ... \n"
+    for I in `seq 1 30`;
+    do
+        sleep 1
+        if [[ $(ssh_available) == "Yes" ]];
+        then
+            break
+        fi
+    done
+
+    if [[ $(ssh_available) == "No" ]];
+    then
+       echo -e "\n RPi still not accessible through ssh ! Aborting ! \n"
+       exit 1
+    fi
+
+}
+
+function ssh_available()
+{
+
+    if [ "$(pgrep qemu-system-arm)" == "" ];
+    then
+       pgrep qemu-system-arm
+       echo -e "\n qemu crashed ? Aborting ! \n"
+       exit 1
+    fi
+
+    if [ -z "$(echo "hello?" | nc -w 3 localhost 2200 | grep OpenSSH)" ]
+    then
+        echo "No"
+    else
+        echo "Yes"
+    fi
+}
+
+function wait_until_qemu_down()
+{
+    echo -e "\n Waiting until RPi is down ... \n"
+    for I in `seq 1 30`;
+    do
+        sleep 1
+        if [ "$(pgrep qemu-system-arm)" == "" ]
+        then
+            break
+        fi
+    done
+
+    if [ "$(pgrep qemu-system-arm)" != "" ]
+    then
+       sleep 1
+       pkill -9 qemu-system-arm
+       sleep 1
+       #echo -e "\n One QEMU process still up ! Aborting ! \n"
+       #exit 1
+    fi
+
+}
+
 ###############################################################################
 
 function poweroff_virtual_pi()
@@ -143,7 +204,7 @@ function poweroff_virtual_pi()
     then
         echo -e "\n Powering off currently running virtual pi. \n"
         ssh -p 2200 -i ./.ssh/trotinette root@127.0.0.1 "poweroff"
-        sleep 30
+        wait_until_qemu_down
     fi
 }
 
@@ -178,18 +239,7 @@ function launch_virtual_pi()
         ssh-keygen -f "/root/.ssh/known_hosts" -R [127.0.0.1]:2200 2>/dev/null
 
         # Wait to be sure pi is fully up
-        echo -e "\n Waiting for virtual pi to be fully up ... \n"
-
-        sleep 5
-
-        if [ "$(pgrep qemu-system-arm)" == "" ];
-        then
-            pgrep qemu-system-arm
-            echo -e "\n qemu crashed ? Aborting ! \n"
-            exit 1
-        fi
-
-        sleep 60
+        wait_until_ssh_available
 
         # Add the new ECDSA host key
         ssh-keyscan -H -p 2200 127.0.0.1 >> ~/.ssh/known_hosts
@@ -296,19 +346,22 @@ function main()
 
     launch_virtual_pi
 
-    #run_on_virtual_pi pi_resize_sda_step1
-    #sleep 1
-    #poweroff_virtual_pi
-    #sleep 1
-    #launch_virtual_pi
-    #sleep 1
-    #run_on_virtual_pi pi_resize_sda_step2
+    run_on_virtual_pi pi_resize_sda_step1
+    sleep 1
+    poweroff_virtual_pi
+    sleep 1
+    launch_virtual_pi
+    sleep 1
+    run_on_virtual_pi pi_resize_sda_step2
 
     cp ${IMAGE}.img ${IMAGE}-bkpafterresize.img
 
-    #run_on_virtual_pi pi_upgrade
-    #run_on_virtual_pi pi_install_yunohost
+    run_on_virtual_pi pi_upgrade
+    run_on_virtual_pi pi_install_yunohost
     # FIXME : script fails here because of return value at the end of install o.O
+
+    launch_virtual_pi
+    sleep 1
 
     run_on_virtual_pi pi_setup_firstboot
 
@@ -317,9 +370,9 @@ function main()
     poweroff_virtual_pi
 
     untweak_image
+
+    cp ${IMAGE}.img ${IMAGE}-ready.img
 }
 
 main
-
-
 
