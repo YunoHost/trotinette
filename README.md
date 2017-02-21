@@ -17,4 +17,10 @@ Launching this script will :
 
 ## To do
 
-- Test the firstboot stuff
+- Moar test on real Raspberry Pi (1, 2 and 3)
+    - Does it boot correctly ?
+    - Does the firstboot correctly resize the rootfs ?
+    - Is everything clean ? (logs, ssh keys, ssh fingerprint ?)
+    - Is ipv6 working ?
+
+- Prompt to force root to change password at first login

@@ -354,6 +354,8 @@ function main()
     # Upgrade system and install yunohost
     run_on_virtual_pi pi_upgrade
     run_on_virtual_pi pi_install_yunohost
+    # FIXME : for some reason command stays blocked after displaying "Success" ?
+    # Had to ssh in manually to kill the corresponding sshd process.
     poweroff_virtual_pi
 
     cp ${IMAGE}.img ${IMAGE}-bkpafterinstall.img
