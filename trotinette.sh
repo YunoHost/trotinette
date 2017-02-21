@@ -316,7 +316,7 @@ function pi_install_yunohost()
     sed -i 's/rpi-update/rpi-update <<< "y"/g' install_yunohost
 
     # FIXME : aaaand another dirty hack : don't reboot the RPi after install
-    sed -i 's/    reboot/    echo "Not rebooting" #reboot/g' install_yunohost
+    sed -i 's/    reboot/    success; exit 0; #reboot/g' install_yunohost
 
     touch /var/log/yunohost-installation.log
     tail -f /var/log/yunohost-installation.log &
@@ -343,23 +343,22 @@ function main()
 
     launch_virtual_pi
 
+    # Resize sda
     run_on_virtual_pi pi_resize_sda_step1
-    sleep 1
     poweroff_virtual_pi
-    sleep 1
     launch_virtual_pi
-    sleep 1
     run_on_virtual_pi pi_resize_sda_step2
 
     cp ${IMAGE}.img ${IMAGE}-bkpafterresize.img
 
+    # Upgrade system and install yunohost
     run_on_virtual_pi pi_upgrade
     run_on_virtual_pi pi_install_yunohost
+    poweroff_virtual_pi
 
     cp ${IMAGE}.img ${IMAGE}-bkpafterinstall.img
 
-    poweroff_virtual_pi
- 
+    # Make image ready for prod
     untweak_image
 
     cp ${IMAGE}.img ${IMAGE}-ready.img
