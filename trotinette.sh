@@ -102,15 +102,11 @@ function untweak_image()
     # Re-enable mounting of /dev/mm0blockthing
     sed -i 's@#/dev@/dev@g' /mnt/loop0p2/etc/fstab
     # Allow root login on ssh with password
-    cat  /mnt/loop0p2/etc/ssh/sshd_config | grep "PermitRootLogin"
     sed -i '0,/without-password/s/without-password/yes/g' /mnt/loop0p2/etc/ssh/sshd_config
-    cat  /mnt/loop0p2/etc/ssh/sshd_config | grep "PermitRootLogin"
     # Define root password as 'yunohost'
     echo "Define root password as 'yunohost'"
-    cat /mnt/loop0p2/etc/shadow | grep "root"
     sed -i '1d' /mnt/loop0p2/etc/shadow
     echo "root:$(echo "yunohost" | mkpasswd -m sha-512 -s):17130:0:99999:7:::" >> /mnt/loop0p2/etc/shadow
-    cat /mnt/loop0p2/etc/shadow | grep "root"
 
     # Remove ssh key
     rm /mnt/loop0p2/root/.ssh/authorized_keys
@@ -137,17 +133,28 @@ function generate_ssh_key()
 
 function wait_until_ssh_available()
 {
-    echo -e "\n Waiting until SSH to virtual pi is available ... \n"
+    echo -e "\n Waiting until virtual pi is accessible through SSH ... \n"
     for I in `seq 1 30`;
     do
-        sleep 1
-        if [[ $(ssh_available) == "Yes" ]];
+        printf "."
+        sleep 4
+
+        # Test we still have a qemu running
+        if [ "$(pgrep qemu-system-arm)" == "" ];
         then
+           pgrep qemu-system-arm
+           echo -e "\n qemu crashed ? Aborting ! \n"
+           exit 1
+        fi
+
+        if [ $(ssh_available) == "Yes" ]
+        then
+            echo -e " OK !\n"
             break
         fi
     done
 
-    if [[ $(ssh_available) == "No" ]];
+    if [ $(ssh_available) == "No" ]
     then
        echo -e "\n RPi still not accessible through ssh ! Aborting ! \n"
        exit 1
@@ -157,14 +164,6 @@ function wait_until_ssh_available()
 
 function ssh_available()
 {
-
-    if [ "$(pgrep qemu-system-arm)" == "" ];
-    then
-       pgrep qemu-system-arm
-       echo -e "\n qemu crashed ? Aborting ! \n"
-       exit 1
-    fi
-
     if [ -z "$(echo "hello?" | nc -w 3 localhost 2200 | grep OpenSSH)" ]
     then
         echo "No"
@@ -288,7 +287,7 @@ function pi_upgrade()
 function pi_install_yunohost()
 {
 
-    # Dirty hack to work around lack of ipv6 for nginx
+    # FIXME : Dirty hack to work around lack of ipv6 for nginx
 
     apt-get install -y nginx nginx-extras
     echo -e "\n Applying dirty workaround hack on nginx to disable ipv6 ... \n"
@@ -296,7 +295,7 @@ function pi_install_yunohost()
     service nginx start
     apt-get install -y nginx nginx-extras
 
-    # Dirty hack to work around lack of ipv6 for dovecot
+    # FIXME : Dirty hack to work around lack of ipv6 for dovecot
 
     apt-get install -y dovecot-core dovecot-ldap dovecot-lmtpd dovecot-managesieved dovecot-antispam
     echo -e "\n Applying dirty workaround hack on dovecot to disable ipv6 ... \n"
@@ -306,11 +305,19 @@ function pi_install_yunohost()
 
     # FIXME : add conf variable for install script source and branch to use
 
+    export TERM=xterm
     # Launch actual yunohost install
     mkdir /tmp/install_script
     cd /tmp/install_script
     wget https://raw.githubusercontent.com/YunoHost/install_script/master/install_yunohost
     chmod +x install_yunohost
+
+    # FIXME : Another dirty hack : rpi-update might need a 'yes'
+    sed -i 's/rpi-update/rpi-update <<< "y"/g' install_yunohost
+
+    # FIXME : aaaand another dirty hack : don't reboot the RPi after install
+    sed -i 's/    reboot/    echo "Not rebooting" #reboot/g' install_yunohost
+
     touch /var/log/yunohost-installation.log
     tail -f /var/log/yunohost-installation.log &
     ./install_yunohost -a -d testing
@@ -322,16 +329,6 @@ function pi_install_yunohost()
     # Relaunch configuration ?
     ./install_yunohost -a -d testing
 
-}
-
-function pi_setup_firstboot()
-{
-    wget https://raw.githubusercontent.com/likeitneverwentaway/rpi_buildbot/master/yunohost-firstboot
-
-    chmod a+x yunohost-firstboot
-    cp yunohost-firstboot /etc/init.d/
-    insserv /etc/init.d/yunohost-firstboot
-    touch /etc/yunohost/firstboot
 }
 
 ###############################################################################
@@ -358,17 +355,11 @@ function main()
 
     run_on_virtual_pi pi_upgrade
     run_on_virtual_pi pi_install_yunohost
-    # FIXME : script fails here because of return value at the end of install o.O
-
-    launch_virtual_pi
-    sleep 1
-
-    run_on_virtual_pi pi_setup_firstboot
 
     cp ${IMAGE}.img ${IMAGE}-bkpafterinstall.img
 
     poweroff_virtual_pi
-
+ 
     untweak_image
 
     cp ${IMAGE}.img ${IMAGE}-ready.img
