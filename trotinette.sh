@@ -7,7 +7,7 @@ readonly KERNEL_REPO_NAME=$(basename $KERNEL_REPO)
 
 readonly KERNEL="kernel-qemu-4.4.34-jessie"
 
-readonly IMAGE_LINK="http://vx2-downloads.raspberrypi.org/raspbian_lite/images/raspbian_lite-2017-01-10/2017-01-11-raspbian-jessie-lite.zip"
+readonly IMAGE_LINK="http://vx2-downloads.raspberrypi.org/raspbian_lite/images/raspbian_lite-2017-07-05/2017-07-05-raspbian-jessie-lite.zip"
 readonly IMAGE=$(basename $IMAGE_LINK | cut -d'.' -f1)
 
 ###############################################################################
@@ -57,15 +57,22 @@ function tweak_image()
     # Start by mounting the image..
     kpartx -av ${IMAGE}.img
     sleep 1
+    mkdir -p /mnt/loop0p1
     mkdir -p /mnt/loop0p2
+    mount /dev/mapper/loop0p1 /mnt/loop0p1
     mount /dev/mapper/loop0p2 /mnt/loop0p2
 
     # Need to disable the stuff in ld.so.preload...
     sed -i 's@^@#@g' /mnt/loop0p2/etc/ld.so.preload
     # Need to disable also the mounting of /dev/mm0blockthing
     sed -i 's@/dev@#/dev@g' /mnt/loop0p2/etc/fstab
+
     # Start ssh at boot
-    touch /mnt/loop0p2/boot/ssh
+    touch /mnt/loop0p1/ssh
+
+    # Generate ssh host keys
+    rm /mnt/loop0p2/etc/ssh/ssh_host*
+    ssh-keygen -f /mnt/loop0p2/etc/ssh/ssh_host_rsa_key -N '' -t rsa
 
     # Generate a ssh key to be used by this script to easily access machine
     mkdir -p /mnt/loop0p2/root/.ssh
@@ -108,7 +115,10 @@ function untweak_image()
     sed -i '1d' /mnt/loop0p2/etc/shadow
     echo "root:$(echo "yunohost" | mkpasswd -m sha-512 -s):17130:0:99999:7:::" >> /mnt/loop0p2/etc/shadow
 
-    # Remove ssh key
+    # Remove ssh host key
+    rm /mnt/loop0p2/etc/ssh/ssh_host*
+
+    # Remove ssh authorize key
     rm /mnt/loop0p2/root/.ssh/authorized_keys
 
     # Remove logs
