@@ -72,12 +72,16 @@ function tweak_image()
     generate_ssh_key >/dev/null 2>&1
     cat .ssh/trotinette.pub >> /mnt/loop0p2/root/.ssh/authorized_keys
 
+    # Add file for firstboot script
+    cp ./scripts/firstrun         /mnt/loop0p2/usr/local/bin/
+    cp ./scripts/firstrun.service /mnt/loop0p2/etc/systemd/system/
+
     # Umount image
     umount /mnt/loop0p2
     kpartx -d ${IMAGE}.img
 
     # Exand image size
-    qemu-img resize ${IMAGE}.img +600M
+    qemu-img resize ${IMAGE}.img +800M
 }
 
 function untweak_image()
@@ -90,7 +94,6 @@ function untweak_image()
     sleep 1
     mkdir -p /mnt/loop0p2
     mount /dev/mapper/loop0p2 /mnt/loop0p2
-
 
     # Revert the dirty ipv6 hack
     sed -i 's/#listen \[/listen \[/g' /mnt/loop0p2/etc/nginx/sites-available/default
@@ -320,15 +323,24 @@ function pi_install_yunohost()
 
     touch /var/log/yunohost-installation.log
     tail -f /var/log/yunohost-installation.log &
-    ./install_yunohost -a -d testing
+    ./install_yunohost -a
 
     # Dirty hack again to work around lack of ipv6 for nginx - in yunohost's templates
     echo -e "\n Applying dirty workaround hack on yunohost/nginx to disable ipv6 ... \n"
     sed -i 's/listen \[/#listen \[/g' /usr/share/yunohost/templates/nginx/plain/yunohost_admin.conf
 
     # Relaunch configuration ?
-    ./install_yunohost -a -d testing
+    ./install_yunohost -a
 
+    # Cleant apt stuff
+    apt-get --purge clean
+
+    # Add first boot script
+    chmod +x /usr/local/bin/firstrun
+    /bin/systemctl daemon-reload
+    /bin/systemctl enable firstrun
+
+    poweroff
 }
 
 ###############################################################################

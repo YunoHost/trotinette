@@ -1,0 +1,34 @@
+#!/bin/bash
+
+echo ""
+echo "############################################"
+echo "##         FIRSTRUN INIT SCRIPT           ##"
+echo "## WAIT SOME MINUTES FOR CONFIGURATIONS   ##"
+echo "##                                        ##"
+echo "## Web and ssh servers won't be available ##"
+echo "## during this time                       ##"
+echo "############################################"
+echo ""
+
+# Force root to change its password upon first login
+chage -d0 root
+
+# Prevent user from login in ssh or using webadmin yet
+systemctl stop nginx
+systemctl stop sshd
+
+echo "Regenerating ssh keys ..."
+rm -f /etc/ssh/ssh_host_*
+/usr/sbin/dpkg-reconfigure openssh-server
+
+/bin/systemctl disable firstrun
+
+echo "Updating Rasbperry pi firmware ..."
+rpi-update
+
+echo "Updating Yunohost ..."
+apt-get update
+apt-get install --only-upgrade moulinette yunohost ssowat yunohost-admin
+
+echo "Rebooting..."
+reboot
